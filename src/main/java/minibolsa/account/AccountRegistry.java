@@ -18,6 +18,9 @@ import minibolsa.market.Trade;
  * de duas contas trava sempre a de menor id primeiro, e é isso que impede o
  * deadlock (a única exceção é a transferência ingênua, que existe para mostrar o
  * problema).
+ *
+ * <p>No modo inseguro ({@code --unsafe-accounts}) os locks das contas não fazem
+ * nada: a verificação de saldo e o débito viram um check-then-act sem proteção.
  */
 public final class AccountRegistry {
 
@@ -25,18 +28,25 @@ public final class AccountRegistry {
     /** Ordenado por id: {@link #all()} já sai na ordem em que as contas devem ser travadas. */
     private final Map<Long, Account> byId = new ConcurrentSkipListMap<>();
     private final AtomicLong nextId = new AtomicLong();
+    private final boolean unsafeAccounts;
+    private final long raceWindowMs;
     private final boolean naiveTransfer;
     private final long transferPauseMs;
 
+    /** Modo seguro, sem pausas. */
     public AccountRegistry() {
-        this(false, 0);
+        this(false, 0, false, 0);
     }
 
     /**
+     * @param unsafeAccounts  desliga os locks das contas (demonstração da corrida no saldo)
+     * @param raceWindowMs    pausa entre verificar o saldo e debitar, para a corrida aparecer sempre
      * @param naiveTransfer   transferência trava origem e depois destino (pode dar deadlock, só para demonstração)
      * @param transferPauseMs pausa entre os dois locks da transferência ingênua, para o deadlock aparecer sempre
      */
-    public AccountRegistry(boolean naiveTransfer, long transferPauseMs) {
+    public AccountRegistry(boolean unsafeAccounts, long raceWindowMs, boolean naiveTransfer, long transferPauseMs) {
+        this.unsafeAccounts = unsafeAccounts;
+        this.raceWindowMs = raceWindowMs;
         this.naiveTransfer = naiveTransfer;
         this.transferPauseMs = transferPauseMs;
     }
@@ -65,17 +75,20 @@ public final class AccountRegistry {
      * {@code false} (sem mexer em nada) se faltar dinheiro ou ações.
      *
      * <p>A verificação e o débito acontecem com o lock da conta na mão: duas
-     * ordens simultâneas da mesma conta nunca gastam o mesmo dinheiro.
+     * ordens simultâneas da mesma conta nunca gastam o mesmo dinheiro. Sem o lock
+     * (modo inseguro), as duas podem passar pela verificação antes de qualquer
+     * uma debitar.
      */
     public boolean reserve(Order order) {
         Account account = byId(order.accountId());
-        account.lock.lock();
+        lock(account);
         try {
             if (order.side() == Side.BUY) {
                 long cost = costOf(order.quantity(), order.limitPrice());
                 if (account.cashAvailable < cost) {
                     return false;
                 }
+                raceWindow();
                 account.cashAvailable -= cost;
                 account.cashReserved += cost;
             } else {
@@ -83,13 +96,14 @@ public final class AccountRegistry {
                 if (account.sharesAvailable[i] < order.quantity()) {
                     return false;
                 }
+                raceWindow();
                 account.sharesAvailable[i] -= order.quantity();
                 account.sharesReserved[i] += order.quantity();
             }
             account.openOrders.put(order.id(), order);
             return true;
         } finally {
-            account.lock.unlock();
+            unlock(account);
         }
     }
 
@@ -99,7 +113,7 @@ public final class AccountRegistry {
      */
     public long cancel(Order order) {
         Account account = byId(order.accountId());
-        account.lock.lock();
+        lock(account);
         try {
             long canceled = order.cancel();
             if (order.side() == Side.BUY) {
@@ -114,7 +128,7 @@ public final class AccountRegistry {
             account.openOrders.remove(order.id());
             return canceled;
         } finally {
-            account.lock.unlock();
+            unlock(account);
         }
     }
 
@@ -154,8 +168,8 @@ public final class AccountRegistry {
                 seller.openOrders.remove(trade.sell().id());
             }
         } finally {
-            buyer.lock.unlock();
-            seller.lock.unlock();
+            unlock(buyer);
+            unlock(seller);
         }
     }
 
@@ -179,32 +193,68 @@ public final class AccountRegistry {
         Account first = fromFirst ? from : to;
         Account second = fromFirst ? to : from;
 
-        first.lock.lockInterruptibly();
+        lockInterruptibly(first);
         try {
             if (naiveTransfer) {
                 Thread.sleep(transferPauseMs); // alarga a janela em que a outra transferência trava a sua origem
             }
-            second.lock.lockInterruptibly();
+            lockInterruptibly(second);
             try {
                 if (from.cashAvailable < amount) {
                     return false;
                 }
+                raceWindow();
                 from.cashAvailable -= amount;
                 to.cashAvailable += amount;
                 return true;
             } finally {
-                second.lock.unlock();
+                unlock(second);
             }
         } finally {
-            first.lock.unlock();
+            unlock(first);
         }
     }
 
-    private static void lockInIdOrder(Account a, Account b) {
+    // --- locks das contas: no modo inseguro não fazem nada ---
+
+    void lock(Account account) {
+        if (!unsafeAccounts) {
+            account.lock.lock();
+        }
+    }
+
+    void unlock(Account account) {
+        if (!unsafeAccounts) {
+            account.lock.unlock();
+        }
+    }
+
+    private void lockInterruptibly(Account account) throws InterruptedException {
+        if (!unsafeAccounts) {
+            account.lock.lockInterruptibly();
+        }
+    }
+
+    private void lockInIdOrder(Account a, Account b) {
         Account first = a.id <= b.id ? a : b;
         Account second = first == a ? b : a;
-        first.lock.lock();
-        second.lock.lock();
+        lock(first);
+        lock(second);
+    }
+
+    /**
+     * Pausa artificial entre verificar e debitar ({@code --race-window-ms}). Com o
+     * lock da conta, só deixa tudo mais lento; sem ele, alarga a janela em que
+     * outra thread passa pela mesma verificação.
+     */
+    private void raceWindow() {
+        if (raceWindowMs > 0) {
+            try {
+                Thread.sleep(raceWindowMs);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 
     /** q × p, tratando estouro do {@code long} (quantidade absurda vinda do cliente) como "caro demais". */
