@@ -33,17 +33,20 @@ public final class InvariantChecker {
      * Trava todas as contas em ordem crescente de id (a mesma ordem de todo o
      * resto, então não há deadlock) e verifica as invariantes num estado
      * consistente. Devolve as violações encontradas; lista vazia = tudo certo.
+     *
+     * <p>No modo inseguro os locks não fazem nada, e a verificação é só "melhor
+     * esforço": pode pegar um negócio no meio do caminho.
      */
     public static List<String> check(AccountRegistry registry) {
         List<Account> accounts = registry.all();
         for (Account account : accounts) {
-            account.lock.lock();
+            registry.lock(account);
         }
         try {
             return violations(accounts);
         } finally {
             for (Account account : accounts) {
-                account.lock.unlock();
+                registry.unlock(account);
             }
         }
     }

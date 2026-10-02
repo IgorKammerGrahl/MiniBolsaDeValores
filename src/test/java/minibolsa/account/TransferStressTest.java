@@ -74,7 +74,7 @@ class TransferStressTest {
     @Test
     @Timeout(10)
     void naiveCrossTransfersDeadlockAndInterruptReleasesThem() throws Exception {
-        AccountRegistry registry = new AccountRegistry(true, 200);
+        AccountRegistry registry = new AccountRegistry(false, 0, true, 200); // transferência ingênua, pausa de 200 ms
         Account a = registry.login("a");
         Account b = registry.login("b");
         CyclicBarrier start = new CyclicBarrier(2);
