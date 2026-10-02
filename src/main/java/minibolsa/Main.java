@@ -20,6 +20,7 @@ public final class Main {
                          --race-window-ms 0       pausa entre verificar o saldo e debitar
                          --naive-transfer         transferência que pode dar deadlock (demonstração)
                          --transfer-pause-ms 10   pausa entre os dois locks da transferência ingênua
+                         --audit-every 0          verifica as invariantes a cada N segundos (0 = nunca)
               client   cliente de terminal (--host localhost --port 9000)
               bots     robôs que negociam sozinhos
               bench    benchmark do motor de ordens (em processo, saída CSV)

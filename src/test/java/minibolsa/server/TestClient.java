@@ -54,6 +54,16 @@ final class TestClient implements AutoCloseable {
         return lines;
     }
 
+    /** Manda STATS e devolve o contador pedido, ex.: {@code stat("clients")} de "STATS ... clients=2 ...". */
+    long stat(String name) throws IOException {
+        for (String field : request("STATS").split(" ")) {
+            if (field.startsWith(name + "=")) {
+                return Long.parseLong(field.substring(name.length() + 1));
+            }
+        }
+        throw new IllegalStateException("STATS sem o contador " + name);
+    }
+
     boolean closedByServer() throws IOException {
         return in.readLine() == null;
     }
