@@ -69,6 +69,7 @@ public final class Server implements AutoCloseable {
     private final ExecutorService transferPool =
             Executors.newFixedThreadPool(TRANSFER_THREADS, Thread.ofPlatform().name("transferencia-", 1).factory());
     private final MarketDataPublisher marketData = new MarketDataPublisher();
+    private final DeadlockWatchdog watchdog = new DeadlockWatchdog();
 
     private final Set<ClientSession> sessions = ConcurrentHashMap.newKeySet();
     /** Sessões logadas em cada conta (uma conta pode estar aberta em vários clientes): para onde vão os FILL. */
@@ -98,6 +99,7 @@ public final class Server implements AutoCloseable {
     public void start() {
         marketData.start();
         auditor.start();
+        watchdog.start();
         acceptThread.start();
         Log.info("Servidor ouvindo na porta " + port()
                 + " | motor: " + (config.strategy() == Strategy.SINGLE_WRITER ? "single-writer" : "global-lock")
@@ -169,13 +171,16 @@ public final class Server implements AutoCloseable {
         try {
             return result.get();
         } catch (ExecutionException e) {
+            if (e.getCause() instanceof InterruptedException) { // shutdownNow tirou a transferência de um deadlock
+                throw new InterruptedException("transferência interrompida");
+            }
             throw new IllegalStateException("transferência falhou", e.getCause());
         }
     }
 
     String stats() {
         return "STATS orders=" + ordersAccepted.get() + " trades=" + trades.get() + " clients=" + sessions.size()
-                + " violations=" + auditor.violations();
+                + " violations=" + auditor.violations() + " deadlocks=" + watchdog.deadlocks();
     }
 
     /** Roda na thread do motor, logo depois da liquidação: só enfileira, nunca bloqueia. */
@@ -221,6 +226,7 @@ public final class Server implements AutoCloseable {
         ExecutorShutdown.shutdownAndAwait(sessionExecutor, "sessões");
         marketData.close();
         auditor.close();
+        watchdog.close();
         exchange.close();
         Log.info("Servidor encerrado. " + stats());
     }

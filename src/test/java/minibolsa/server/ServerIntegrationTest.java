@@ -68,7 +68,7 @@ class ServerIntegrationTest {
             assertEquals("CASH 97690.00 0.00", biaPortfolio.get(1)); // reservou a 39,00, pagou 38,50
             assertEquals("SHARES PETR4 1060 0", biaPortfolio.get(2));
 
-            assertEquals("STATS orders=2 trades=1 clients=2 violations=0", ana.request("STATS"));
+            assertEquals("STATS orders=2 trades=1 clients=2 violations=0 deadlocks=0", ana.request("STATS"));
         }
     }
 
