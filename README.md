@@ -69,4 +69,16 @@ END
 Toda conta nova começa com R$ 100.000,00 e 1.000 ações de cada ativo (PETR4,
 VALE3, ITUB4, BBDC4, MGLU3). `HELP` lista os comandos. Quando uma ordem sua é
 executada, chega um `FILL <id> <ATIVO> <BUY|SELL> <qtd> <preco>` a qualquer
-momento.
+momento. Com `SUBSCRIBE <ATIVO|ALL>`, chega a cada segundo um
+`TICK <ATIVO> <ultimo_preco> <variacao_%> <volume>` (variação sobre o preço
+inicial, volume desde que o servidor subiu).
+
+### Monitoramento
+
+- `--audit-every N`: a cada N segundos o servidor verifica as invariantes
+  (conservação do dinheiro e das ações, reservas, livros) e loga qualquer
+  violação com `!!! AUDITORIA`.
+- O watchdog de deadlock roda sempre: se threads ficarem presas esperando umas
+  pelas outras, o log mostra `!!! DEADLOCK` com quem espera quem.
+- `STATS` mostra ordens, negócios, clientes conectados, violações e deadlocks
+  detectados.

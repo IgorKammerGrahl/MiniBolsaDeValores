@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.List;
 import minibolsa.account.AccountSnapshot;
+import minibolsa.market.Asset;
 import minibolsa.market.BookSnapshot;
 import minibolsa.market.Order;
 import minibolsa.market.Trade;
@@ -34,6 +35,15 @@ class ProtocolTest {
         assertEquals(new Command.Stats(), Protocol.parse("STATS"));
         assertEquals(new Command.Help(), Protocol.parse("help"));
         assertEquals(new Command.Quit(), Protocol.parse("QUIT"));
+        assertEquals(new Command.Subscribe(List.of(PETR4), false), Protocol.parse("subscribe petr4"));
+        assertEquals(new Command.Subscribe(List.of(Asset.values()), true), Protocol.parse("SUBSCRIBE all"));
+    }
+
+    @Test
+    void formatsTicksWithChangeAgainstTheInitialPrice() {
+        assertEquals("TICK PETR4 38.50 0.00 0", Protocol.tick(PETR4, 3850, 0));
+        assertEquals("TICK PETR4 39.27 +2.00 150", Protocol.tick(PETR4, 3927, 150)); // 77 / 3850 = 2%
+        assertEquals("TICK VALE3 61.38 -1.00 10", Protocol.tick(VALE3, 6138, 10)); // −62 / 6200 = −1%
     }
 
     @ParameterizedTest
@@ -54,6 +64,8 @@ class ProtocolTest {
         "CANCEL abc              | INVALID_COMMAND",
         "TRANSFER bia 0.00       | INVALID_COMMAND",
         "PORTFOLIO agora         | INVALID_COMMAND",
+        "SUBSCRIBE               | INVALID_COMMAND",
+        "SUBSCRIBE XPTO3         | UNKNOWN_ASSET",
     })
     void rejectsInvalidLinesWithTheRightCode(String line, Code code) {
         CommandException e = assertThrows(CommandException.class, () -> Protocol.parse(line));

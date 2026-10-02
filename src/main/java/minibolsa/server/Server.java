@@ -40,11 +40,11 @@ public final class Server implements AutoCloseable {
 
     /** Opções da linha de comando do modo {@code server}. */
     public record Config(int port, Strategy strategy, boolean unsafeAccounts, long raceWindowMs,
-                         boolean naiveTransfer, long transferPauseMs) {
+                         boolean naiveTransfer, long transferPauseMs, long auditEverySeconds) {
 
         public static Config parse(String... argv) {
             Args args = Args.parse(argv,
-                    Set.of("--port", "--engine", "--race-window-ms", "--transfer-pause-ms"),
+                    Set.of("--port", "--engine", "--race-window-ms", "--transfer-pause-ms", "--audit-every"),
                     Set.of("--unsafe-accounts", "--naive-transfer"));
             Strategy strategy = switch (args.value("--engine", "single-writer")) {
                 case "single-writer" -> Strategy.SINGLE_WRITER;
@@ -53,7 +53,7 @@ public final class Server implements AutoCloseable {
             };
             return new Config((int) args.number("--port", 9000), strategy, args.flag("--unsafe-accounts"),
                     args.number("--race-window-ms", 0), args.flag("--naive-transfer"),
-                    args.number("--transfer-pause-ms", 10));
+                    args.number("--transfer-pause-ms", 10), args.number("--audit-every", 0));
         }
     }
 
@@ -62,11 +62,14 @@ public final class Server implements AutoCloseable {
     private final Config config;
     private final AccountRegistry registry;
     private final Exchange exchange;
+    private final Auditor auditor;
     private final ServerSocket serverSocket;
     private final Thread acceptThread = Thread.ofPlatform().name("accept").unstarted(this::acceptLoop);
     private final ExecutorService sessionExecutor = Executors.newVirtualThreadPerTaskExecutor();
     private final ExecutorService transferPool =
             Executors.newFixedThreadPool(TRANSFER_THREADS, Thread.ofPlatform().name("transferencia-", 1).factory());
+    private final MarketDataPublisher marketData = new MarketDataPublisher();
+    private final DeadlockWatchdog watchdog = new DeadlockWatchdog();
 
     private final Set<ClientSession> sessions = ConcurrentHashMap.newKeySet();
     /** Sessões logadas em cada conta (uma conta pode estar aberta em vários clientes): para onde vão os FILL. */
@@ -81,6 +84,7 @@ public final class Server implements AutoCloseable {
         this.registry = new AccountRegistry(config.unsafeAccounts(), config.raceWindowMs(),
                 config.naiveTransfer(), config.transferPauseMs());
         this.exchange = new Exchange(registry, config.strategy(), this::onTrade);
+        this.auditor = new Auditor(exchange, config.auditEverySeconds());
         this.serverSocket = new ServerSocket(config.port());
     }
 
@@ -93,13 +97,18 @@ public final class Server implements AutoCloseable {
     }
 
     public void start() {
+        marketData.start();
+        auditor.start();
+        watchdog.start();
         acceptThread.start();
         Log.info("Servidor ouvindo na porta " + port()
                 + " | motor: " + (config.strategy() == Strategy.SINGLE_WRITER ? "single-writer" : "global-lock")
                 + " | contas: " + (config.unsafeAccounts() ? "SEM LOCK" : "com lock")
                 + (config.raceWindowMs() > 0 ? " (janela de corrida " + config.raceWindowMs() + " ms)" : "")
                 + " | transferência: " + (config.naiveTransfer()
-                        ? "INGÊNUA (pausa " + config.transferPauseMs() + " ms)" : "locks em ordem de id"));
+                        ? "INGÊNUA (pausa " + config.transferPauseMs() + " ms)" : "locks em ordem de id")
+                + " | auditoria: " + (config.auditEverySeconds() > 0
+                        ? "a cada " + config.auditEverySeconds() + " s" : "desligada"));
     }
 
     /** A porta real (útil quando a configuração pede a porta 0, "qualquer uma livre"). */
@@ -135,6 +144,10 @@ public final class Server implements AutoCloseable {
         return exchange;
     }
 
+    MarketDataPublisher marketData() {
+        return marketData;
+    }
+
     void orderAccepted() {
         ordersAccepted.incrementAndGet();
     }
@@ -145,6 +158,7 @@ public final class Server implements AutoCloseable {
 
     void disconnected(ClientSession session) {
         sessions.remove(session);
+        marketData.unsubscribe(session);
         Account account = session.account();
         if (account != null) {
             sessionsByAccount.getOrDefault(account.id(), Set.of()).remove(session);
@@ -157,17 +171,22 @@ public final class Server implements AutoCloseable {
         try {
             return result.get();
         } catch (ExecutionException e) {
+            if (e.getCause() instanceof InterruptedException) { // shutdownNow tirou a transferência de um deadlock
+                throw new InterruptedException("transferência interrompida");
+            }
             throw new IllegalStateException("transferência falhou", e.getCause());
         }
     }
 
     String stats() {
-        return "STATS orders=" + ordersAccepted.get() + " trades=" + trades.get() + " clients=" + sessions.size();
+        return "STATS orders=" + ordersAccepted.get() + " trades=" + trades.get() + " clients=" + sessions.size()
+                + " violations=" + auditor.violations() + " deadlocks=" + watchdog.deadlocks();
     }
 
     /** Roda na thread do motor, logo depois da liquidação: só enfileira, nunca bloqueia. */
     private void onTrade(Trade trade) {
         trades.incrementAndGet();
+        marketData.onTrade(trade);
         notifyOwner(trade.buy(), trade);
         notifyOwner(trade.sell(), trade);
     }
@@ -205,6 +224,9 @@ public final class Server implements AutoCloseable {
         }
         ExecutorShutdown.shutdownAndAwait(transferPool, "transferências");
         ExecutorShutdown.shutdownAndAwait(sessionExecutor, "sessões");
+        marketData.close();
+        auditor.close();
+        watchdog.close();
         exchange.close();
         Log.info("Servidor encerrado. " + stats());
     }

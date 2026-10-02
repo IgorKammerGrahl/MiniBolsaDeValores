@@ -10,6 +10,7 @@ import java.io.OutputStreamWriter;
 import java.io.Reader;
 import java.io.Writer;
 import java.net.Socket;
+import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -168,6 +169,10 @@ final class ClientSession {
             case Command.Portfolio p -> send(Protocol.portfolio(server.registry().snapshot(account)));
             case Command.Orders o -> send(Protocol.orders(server.registry().snapshot(account)));
             case Command.Transfer(String user, long amount) -> transfer(user, amount);
+            case Command.Subscribe(List<Asset> assets, boolean all) -> {
+                send("OK SUBSCRIBE " + (all ? "ALL" : assets.getFirst())); // antes de assinar: o OK vem antes do 1º TICK
+                server.marketData().subscribe(this, assets);
+            }
             case Command.Stats s -> send(server.stats());
             case Command.Help h -> send(Protocol.HELP);
             case Command.Quit q -> quit();

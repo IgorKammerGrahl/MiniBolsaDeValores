@@ -43,7 +43,7 @@ class SlowClientTest {
 
             try (TestClient fast = new TestClient(server.port())) {
                 assertEquals("OK LOGIN rapido 100000.00", fast.request("LOGIN rapido"));
-                while (!fast.request("STATS").endsWith("clients=1")) { // espera o lento sair
+                while (fast.stat("clients") != 1) { // espera o lento sair
                     Thread.sleep(50);
                 }
                 assertTrue(fast.request("BUY PETR4 10 38.50").startsWith("OK ORDER "));

@@ -1,5 +1,6 @@
 package minibolsa.server;
 
+import java.util.List;
 import minibolsa.market.Asset;
 import minibolsa.market.Side;
 
@@ -25,6 +26,10 @@ sealed interface Command {
     }
 
     record Transfer(String user, long amount) implements Command {
+    }
+
+    /** {@code all} = SUBSCRIBE ALL; nesse caso {@code assets} traz todos os ativos. */
+    record Subscribe(List<Asset> assets, boolean all) implements Command {
     }
 
     record Stats() implements Command {
