@@ -194,4 +194,18 @@ class OrderBookTest {
         assertThrows(IllegalArgumentException.class, () -> new Order(1, 1, PETR4, BUY, 0, 3850));
         assertThrows(IllegalArgumentException.class, () -> new Order(1, 1, PETR4, BUY, 10, 0));
     }
+
+    @Test
+    void snapshotSumsEachPriceAndLimitsTheDepth() {
+        book.submit(buy(10, "38.00"));
+        book.submit(buy(5, "38.00"));
+        book.submit(buy(7, "37.90"));
+        book.submit(buy(1, "37.80"));
+        book.submit(sell(3, "38.50"));
+
+        BookSnapshot snapshot = book.snapshot(2);
+
+        assertEquals(List.of(new BookSnapshot.Level(3800, 15), new BookSnapshot.Level(3790, 7)), snapshot.bids());
+        assertEquals(List.of(new BookSnapshot.Level(3850, 3)), snapshot.asks());
+    }
 }

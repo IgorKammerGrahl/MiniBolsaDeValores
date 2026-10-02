@@ -1,11 +1,15 @@
 package minibolsa.account;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicLong;
+import minibolsa.market.Asset;
 import minibolsa.market.Order;
 import minibolsa.market.Side;
 import minibolsa.market.Trade;
@@ -60,8 +64,32 @@ public final class AccountRegistry {
         });
     }
 
+    public Optional<Account> find(String name) {
+        return Optional.ofNullable(byName.get(name));
+    }
+
     public Account byId(long id) {
         return Objects.requireNonNull(byId.get(id), () -> "conta inexistente: " + id);
+    }
+
+    /** Cópia consistente da conta: saldos, ações e ordens abertas lidos com o lock na mão. */
+    public AccountSnapshot snapshot(Account account) {
+        lock(account);
+        try {
+            List<AccountSnapshot.Position> positions = new ArrayList<>();
+            for (Asset asset : Asset.values()) {
+                int i = asset.ordinal();
+                positions.add(new AccountSnapshot.Position(asset, account.sharesAvailable[i], account.sharesReserved[i]));
+            }
+            List<AccountSnapshot.OpenOrder> orders = account.openOrders.values().stream()
+                    .sorted(Comparator.comparingLong(Order::id))
+                    .map(o -> new AccountSnapshot.OpenOrder(o.id(), o.asset(), o.side(), o.remaining(), o.quantity(),
+                            o.limitPrice()))
+                    .toList();
+            return new AccountSnapshot(account.name, account.cashAvailable, account.cashReserved, positions, orders);
+        } finally {
+            unlock(account);
+        }
     }
 
     /** Todas as contas, em ordem crescente de id. */
