@@ -156,4 +156,29 @@ class AccountRegistryTest {
         assertEquals(0, ana.sharesReserved[PETR4.ordinal()]);
         assertTrue(ana.openOrders.isEmpty());
     }
+
+    @Test
+    void transferMovesAvailableCash() throws InterruptedException {
+        assertTrue(registry.transfer(ana, bia, 500_00));
+
+        assertEquals(INITIAL_CASH - 500_00, ana.cashAvailable);
+        assertEquals(INITIAL_CASH + 500_00, bia.cashAvailable);
+    }
+
+    @Test
+    void reservedCashCannotBeTransferred() throws InterruptedException {
+        registry.reserve(order(ana, BUY, PETR4, 2_000, "38.50")); // reserva 77.000,00
+
+        assertFalse(registry.transfer(ana, bia, 30_000_00));
+
+        assertEquals(INITIAL_CASH - 77_000_00, ana.cashAvailable);
+        assertEquals(INITIAL_CASH, bia.cashAvailable);
+    }
+
+    @Test
+    @Timeout(5)
+    void transferToItselfChangesNothing() throws InterruptedException {
+        assertTrue(registry.transfer(ana, ana, 100_00));
+        assertEquals(INITIAL_CASH, ana.cashAvailable);
+    }
 }

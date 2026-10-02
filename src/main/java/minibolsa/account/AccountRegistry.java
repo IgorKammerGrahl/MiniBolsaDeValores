@@ -25,6 +25,21 @@ public final class AccountRegistry {
     /** Ordenado por id: {@link #all()} já sai na ordem em que as contas devem ser travadas. */
     private final Map<Long, Account> byId = new ConcurrentSkipListMap<>();
     private final AtomicLong nextId = new AtomicLong();
+    private final boolean naiveTransfer;
+    private final long transferPauseMs;
+
+    public AccountRegistry() {
+        this(false, 0);
+    }
+
+    /**
+     * @param naiveTransfer   transferência trava origem e depois destino (pode dar deadlock, só para demonstração)
+     * @param transferPauseMs pausa entre os dois locks da transferência ingênua, para o deadlock aparecer sempre
+     */
+    public AccountRegistry(boolean naiveTransfer, long transferPauseMs) {
+        this.naiveTransfer = naiveTransfer;
+        this.transferPauseMs = transferPauseMs;
+    }
 
     /** Devolve a conta do usuário, criando-a com o saldo inicial se ainda não existir. */
     public Account login(String name) {
@@ -141,6 +156,47 @@ public final class AccountRegistry {
         } finally {
             buyer.lock.unlock();
             seller.lock.unlock();
+        }
+    }
+
+    /**
+     * Move {@code amount} centavos de dinheiro disponível de {@code from} para
+     * {@code to}. Devolve {@code false} (sem mexer em nada) se faltar saldo.
+     *
+     * <p>Modo normal: trava as duas contas em ordem crescente de id, como a
+     * liquidação. Modo ingênuo: trava a origem, espera um pouco e trava o
+     * destino. Duas transferências cruzadas (A→B e B→A) travam cada uma a sua
+     * origem e ficam esperando pela outra para sempre: deadlock.
+     *
+     * <p>Os locks são pegos com {@code lockInterruptibly}: interromper a thread
+     * (o {@code shutdownNow} de um executor) a tira de um deadlock.
+     */
+    public boolean transfer(Account from, Account to, long amount) throws InterruptedException {
+        if (amount <= 0) {
+            throw new IllegalArgumentException("valor deve ser positivo: " + amount);
+        }
+        boolean fromFirst = naiveTransfer || from.id <= to.id;
+        Account first = fromFirst ? from : to;
+        Account second = fromFirst ? to : from;
+
+        first.lock.lockInterruptibly();
+        try {
+            if (naiveTransfer) {
+                Thread.sleep(transferPauseMs); // alarga a janela em que a outra transferência trava a sua origem
+            }
+            second.lock.lockInterruptibly();
+            try {
+                if (from.cashAvailable < amount) {
+                    return false;
+                }
+                from.cashAvailable -= amount;
+                to.cashAvailable += amount;
+                return true;
+            } finally {
+                second.lock.unlock();
+            }
+        } finally {
+            first.lock.unlock();
         }
     }
 
