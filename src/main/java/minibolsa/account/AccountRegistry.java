@@ -8,6 +8,7 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicLong;
 import minibolsa.market.Order;
 import minibolsa.market.Side;
+import minibolsa.market.Trade;
 
 /**
  * Cadastro de contas e todas as operações que mexem nelas: reserva,
@@ -100,6 +101,54 @@ public final class AccountRegistry {
         } finally {
             account.lock.unlock();
         }
+    }
+
+    /**
+     * Liquida um negócio de q ações ao preço e. O comprador tinha reservado
+     * q × L (L = limite da compra) e recebe de volta a diferença q × (L − e).
+     *
+     * <p>Trava as duas contas em ordem crescente de id. Como toda operação com
+     * duas contas segue a mesma ordem, nunca há duas threads esperando uma pela
+     * outra em ciclo. Se comprador e vendedor forem a mesma conta (self-trade), o
+     * lock é reentrante e a mesma thread o pega duas vezes.
+     *
+     * <p>A quantidade restante das ordens muda aqui dentro, junto com os saldos:
+     * quem olhar as contas travadas (a auditoria) nunca vê um negócio pela metade.
+     */
+    public void settle(Trade trade) {
+        Account buyer = byId(trade.buy().accountId());
+        Account seller = byId(trade.sell().accountId());
+        lockInIdOrder(buyer, seller);
+        try {
+            long q = trade.quantity();
+            long price = trade.price();
+            long limit = trade.buy().limitPrice();
+            int i = trade.asset().ordinal();
+
+            trade.fillOrders();
+            buyer.cashReserved -= q * limit;
+            buyer.cashAvailable += q * (limit - price);
+            buyer.sharesAvailable[i] += q;
+            seller.sharesReserved[i] -= q;
+            seller.cashAvailable += q * price;
+
+            if (trade.buy().remaining() == 0) {
+                buyer.openOrders.remove(trade.buy().id());
+            }
+            if (trade.sell().remaining() == 0) {
+                seller.openOrders.remove(trade.sell().id());
+            }
+        } finally {
+            buyer.lock.unlock();
+            seller.lock.unlock();
+        }
+    }
+
+    private static void lockInIdOrder(Account a, Account b) {
+        Account first = a.id <= b.id ? a : b;
+        Account second = first == a ? b : a;
+        first.lock.lock();
+        second.lock.lock();
     }
 
     /** q × p, tratando estouro do {@code long} (quantidade absurda vinda do cliente) como "caro demais". */

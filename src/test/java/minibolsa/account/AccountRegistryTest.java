@@ -14,14 +14,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import minibolsa.market.Asset;
 import minibolsa.market.Money;
 import minibolsa.market.Order;
+import minibolsa.market.OrderBook;
 import minibolsa.market.Side;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 class AccountRegistryTest {
 
     private final AccountRegistry registry = new AccountRegistry();
     private final Account ana = registry.login("ana");
     private final Account bia = registry.login("bia");
+    private final OrderBook book = new OrderBook(PETR4, registry::settle);
     private long nextOrderId = 1;
 
     private Order order(Account account, Side side, Asset asset, long qty, String price) {
@@ -105,5 +108,52 @@ class AccountRegistryTest {
         assertTrue(ana.openOrders.isEmpty());
         assertEquals(0, registry.cancel(buy)); // cancelar de novo não devolve nada
         assertEquals(INITIAL_CASH, ana.cashAvailable);
+    }
+
+    /** Reserva e manda para o livro, que chama registry.settle a cada negócio. */
+    private void place(Order order) {
+        assertTrue(registry.reserve(order));
+        book.submit(order);
+    }
+
+    @Test
+    void settlementPaysTheExecutionPriceAndRefundsTheDifference() {
+        place(order(bia, SELL, PETR4, 10, "38.00"));
+        place(order(ana, BUY, PETR4, 10, "40.00")); // reservou 400.00, executa a 38.00
+
+        assertEquals(INITIAL_CASH - 380_00, ana.cashAvailable); // devolveu os 20.00 de diferença
+        assertEquals(0, ana.cashReserved);
+        assertEquals(INITIAL_SHARES + 10, ana.sharesAvailable[PETR4.ordinal()]);
+        assertEquals(INITIAL_CASH + 380_00, bia.cashAvailable);
+        assertEquals(INITIAL_SHARES - 10, bia.sharesAvailable[PETR4.ordinal()]);
+        assertEquals(0, bia.sharesReserved[PETR4.ordinal()]);
+        assertTrue(ana.openOrders.isEmpty());
+        assertTrue(bia.openOrders.isEmpty());
+    }
+
+    @Test
+    void partialSettlementKeepsTheReservationOfWhatIsLeft() {
+        Order buy = order(ana, BUY, PETR4, 100, "38.50");
+        place(buy);
+        place(order(bia, SELL, PETR4, 30, "38.50"));
+
+        assertEquals(70, buy.remaining());
+        assertEquals(70 * 3850, ana.cashReserved);
+        assertSame(buy, ana.openOrders.get(buy.id()));
+        assertEquals(INITIAL_CASH + 30 * 3850, bia.cashAvailable);
+        assertTrue(bia.openOrders.isEmpty());
+    }
+
+    @Test
+    @Timeout(5)
+    void selfTradeSettlesWithTheReentrantLock() {
+        place(order(ana, SELL, PETR4, 10, "38.50"));
+        place(order(ana, BUY, PETR4, 10, "38.50"));
+
+        assertEquals(INITIAL_CASH, ana.cashAvailable);
+        assertEquals(0, ana.cashReserved);
+        assertEquals(INITIAL_SHARES, ana.sharesAvailable[PETR4.ordinal()]);
+        assertEquals(0, ana.sharesReserved[PETR4.ordinal()]);
+        assertTrue(ana.openOrders.isEmpty());
     }
 }
