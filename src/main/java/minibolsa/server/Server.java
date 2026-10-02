@@ -67,6 +67,7 @@ public final class Server implements AutoCloseable {
     private final ExecutorService sessionExecutor = Executors.newVirtualThreadPerTaskExecutor();
     private final ExecutorService transferPool =
             Executors.newFixedThreadPool(TRANSFER_THREADS, Thread.ofPlatform().name("transferencia-", 1).factory());
+    private final MarketDataPublisher marketData = new MarketDataPublisher();
 
     private final Set<ClientSession> sessions = ConcurrentHashMap.newKeySet();
     /** Sessões logadas em cada conta (uma conta pode estar aberta em vários clientes): para onde vão os FILL. */
@@ -93,6 +94,7 @@ public final class Server implements AutoCloseable {
     }
 
     public void start() {
+        marketData.start();
         acceptThread.start();
         Log.info("Servidor ouvindo na porta " + port()
                 + " | motor: " + (config.strategy() == Strategy.SINGLE_WRITER ? "single-writer" : "global-lock")
@@ -135,6 +137,10 @@ public final class Server implements AutoCloseable {
         return exchange;
     }
 
+    MarketDataPublisher marketData() {
+        return marketData;
+    }
+
     void orderAccepted() {
         ordersAccepted.incrementAndGet();
     }
@@ -145,6 +151,7 @@ public final class Server implements AutoCloseable {
 
     void disconnected(ClientSession session) {
         sessions.remove(session);
+        marketData.unsubscribe(session);
         Account account = session.account();
         if (account != null) {
             sessionsByAccount.getOrDefault(account.id(), Set.of()).remove(session);
@@ -168,6 +175,7 @@ public final class Server implements AutoCloseable {
     /** Roda na thread do motor, logo depois da liquidação: só enfileira, nunca bloqueia. */
     private void onTrade(Trade trade) {
         trades.incrementAndGet();
+        marketData.onTrade(trade);
         notifyOwner(trade.buy(), trade);
         notifyOwner(trade.sell(), trade);
     }
@@ -205,6 +213,7 @@ public final class Server implements AutoCloseable {
         }
         ExecutorShutdown.shutdownAndAwait(transferPool, "transferências");
         ExecutorShutdown.shutdownAndAwait(sessionExecutor, "sessões");
+        marketData.close();
         exchange.close();
         Log.info("Servidor encerrado. " + stats());
     }

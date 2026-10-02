@@ -1,5 +1,6 @@
 package minibolsa.server;
 
+import java.util.List;
 import java.util.Locale;
 import minibolsa.account.AccountSnapshot;
 import minibolsa.market.Asset;
@@ -33,6 +34,7 @@ final class Protocol {
             PORTFOLIO                    CASH <disponivel> <reservado>; SHARES <ATIVO> <disponiveis> <reservadas>
             ORDERS                       ORDER <id> <ATIVO> <lado> <restante> <original> <preco>
             TRANSFER <usuario> <valor>   transfere dinheiro disponível
+            SUBSCRIBE <ATIVO|ALL>        recebe a cada segundo TICK <ATIVO> <ultimo> <variacao_%> <volume>
             STATS                        contadores do servidor
             HELP                         esta ajuda
             QUIT                         sai
@@ -68,6 +70,11 @@ final class Protocol {
                 expect(t, 2, "TRANSFER <usuario> <valor>");
                 yield new Command.Transfer(t[1], positiveMoney(t[2]));
             }
+            case "SUBSCRIBE" -> {
+                expect(t, 1, "SUBSCRIBE <ATIVO|ALL>");
+                boolean all = t[1].equalsIgnoreCase("ALL");
+                yield new Command.Subscribe(all ? List.of(Asset.values()) : List.of(asset(t[1])), all);
+            }
             case "PORTFOLIO" -> noArguments(t, new Command.Portfolio());
             case "ORDERS" -> noArguments(t, new Command.Orders());
             case "STATS" -> noArguments(t, new Command.Stats());
@@ -79,6 +86,18 @@ final class Protocol {
 
     static String error(Code code, String message) {
         return "ERR " + code.wire + " " + message;
+    }
+
+    /**
+     * TICK com o último preço, a variação em relação ao preço inicial e o
+     * volume negociado desde que o servidor subiu. A variação é calculada em
+     * centésimos de ponto percentual, com inteiros, e sai com duas casas como o
+     * dinheiro: 200 → "+2.00".
+     */
+    static String tick(Asset asset, long lastPrice, long volume) {
+        long change = (lastPrice - asset.initialPrice()) * 10_000 / asset.initialPrice();
+        return "TICK " + asset + " " + Money.format(lastPrice) + " " + (change > 0 ? "+" : "") + Money.format(change)
+                + " " + volume;
     }
 
     /** FILL para o dono de {@code order}, que é uma das duas pontas do negócio. */
