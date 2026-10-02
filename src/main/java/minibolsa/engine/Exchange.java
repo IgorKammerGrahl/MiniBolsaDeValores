@@ -4,11 +4,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import minibolsa.account.Account;
 import minibolsa.account.AccountRegistry;
 import minibolsa.account.InvariantChecker;
 import minibolsa.engine.OrderRejectedException.Reason;
 import minibolsa.market.Asset;
+import minibolsa.market.BookSnapshot;
 import minibolsa.market.Order;
 import minibolsa.market.OrderBook;
 import minibolsa.market.Side;
@@ -39,10 +41,22 @@ public final class Exchange implements AutoCloseable {
     private final AtomicLong nextOrderId = new AtomicLong();
 
     public Exchange(AccountRegistry registry, Strategy strategy) {
+        this(registry, strategy, trade -> { });
+    }
+
+    /**
+     * @param onTrade chamado na thread do motor logo depois de cada liquidação.
+     *                Não pode bloquear: o motor inteiro esperaria por ele.
+     */
+    public Exchange(AccountRegistry registry, Strategy strategy, Consumer<Trade> onTrade) {
         this.registry = registry;
+        Consumer<Trade> settlement = trade -> {
+            registry.settle(trade);
+            onTrade.accept(trade);
+        };
         this.engine = switch (strategy) {
-            case SINGLE_WRITER -> new SingleWriterEngine(registry::settle);
-            case GLOBAL_LOCK -> new GlobalLockEngine(registry::settle, Runtime.getRuntime().availableProcessors());
+            case SINGLE_WRITER -> new SingleWriterEngine(settlement);
+            case GLOBAL_LOCK -> new GlobalLockEngine(settlement, Runtime.getRuntime().availableProcessors());
         };
     }
 
@@ -83,6 +97,11 @@ public final class Exchange implements AutoCloseable {
             book.remove(order);
             return registry.cancel(order);
         });
+    }
+
+    /** Os melhores {@code depth} níveis de cada lado, lidos dentro do motor. */
+    public CompletableFuture<BookSnapshot> book(Asset asset, int depth) {
+        return engine.run(asset, book -> book.snapshot(depth));
     }
 
     /**

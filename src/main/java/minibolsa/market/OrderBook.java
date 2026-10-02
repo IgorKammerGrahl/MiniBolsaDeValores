@@ -113,4 +113,24 @@ public final class OrderBook {
     public boolean isCrossed() {
         return !bids.isEmpty() && !asks.isEmpty() && bids.firstKey() >= asks.firstKey();
     }
+
+    /** Até {@code depth} níveis de cada lado, com a quantidade restante somada por preço. */
+    public BookSnapshot snapshot(int depth) {
+        return new BookSnapshot(asset, levels(bids, depth), levels(asks, depth));
+    }
+
+    private static List<BookSnapshot.Level> levels(TreeMap<Long, ArrayDeque<Order>> side, int depth) {
+        List<BookSnapshot.Level> levels = new ArrayList<>();
+        for (var level : side.entrySet()) {
+            if (levels.size() == depth) {
+                break;
+            }
+            long quantity = 0;
+            for (Order order : level.getValue()) {
+                quantity += order.remaining();
+            }
+            levels.add(new BookSnapshot.Level(level.getKey(), quantity));
+        }
+        return levels;
+    }
 }

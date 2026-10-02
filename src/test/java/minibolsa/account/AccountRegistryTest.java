@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
 import minibolsa.market.Asset;
 import minibolsa.market.Money;
 import minibolsa.market.Order;
@@ -180,5 +181,30 @@ class AccountRegistryTest {
     void transferToItselfChangesNothing() throws InterruptedException {
         assertTrue(registry.transfer(ana, ana, 100_00));
         assertEquals(INITIAL_CASH, ana.cashAvailable);
+    }
+
+    @Test
+    void findsAccountsByName() {
+        assertSame(bia, registry.find("bia").orElseThrow());
+        assertTrue(registry.find("ninguem").isEmpty());
+    }
+
+    @Test
+    void snapshotCopiesBalancesSharesAndOpenOrders() {
+        Order buy = order(ana, BUY, PETR4, 100, "38.50");
+        Order sell = order(ana, SELL, VALE3, 30, "62.00");
+        registry.reserve(sell);
+        registry.reserve(buy);
+
+        AccountSnapshot snapshot = registry.snapshot(ana);
+
+        assertEquals("ana", snapshot.name());
+        assertEquals(INITIAL_CASH - 3850_00, snapshot.cashAvailable());
+        assertEquals(3850_00, snapshot.cashReserved());
+        assertEquals(new AccountSnapshot.Position(VALE3, INITIAL_SHARES - 30, 30),
+                snapshot.positions().get(VALE3.ordinal()));
+        assertEquals(List.of(
+                new AccountSnapshot.OpenOrder(buy.id(), PETR4, BUY, 100, 100, 3850),
+                new AccountSnapshot.OpenOrder(sell.id(), VALE3, SELL, 30, 30, 6200)), snapshot.openOrders());
     }
 }
