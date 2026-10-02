@@ -44,4 +44,29 @@ java -jar target/mini-bolsa.jar help
 | `bots` | robôs que negociam sozinhos |
 | `bench` | benchmark do motor de ordens, com saída em CSV |
 
-> Projeto em construção: os modos ainda estão vazios e serão implementados nos próximos PRs.
+> Projeto em construção: `bots` e `bench` ainda estão vazios e serão implementados nos próximos PRs.
+
+### Servidor e cliente
+
+```sh
+java -jar target/mini-bolsa.jar server --port 9000
+java -jar target/mini-bolsa.jar client --host localhost --port 9000   # em outro terminal
+```
+
+O `nc localhost 9000` também funciona como cliente. Exemplo de sessão:
+
+```
+LOGIN ana
+OK LOGIN ana 100000.00
+SELL PETR4 100 38.50
+OK ORDER 1
+BOOK PETR4
+BOOK PETR4
+ASK 38.50 100
+END
+```
+
+Toda conta nova começa com R$ 100.000,00 e 1.000 ações de cada ativo (PETR4,
+VALE3, ITUB4, BBDC4, MGLU3). `HELP` lista os comandos. Quando uma ordem sua é
+executada, chega um `FILL <id> <ATIVO> <BUY|SELL> <qtd> <preco>` a qualquer
+momento.
