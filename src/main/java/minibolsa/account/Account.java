@@ -47,6 +47,11 @@ public final class Account {
         return name;
     }
 
+    /** A ordem aberta com esse id, ou {@code null} se ela não existe ou já foi encerrada. */
+    public Order openOrder(long orderId) {
+        return openOrders.get(orderId);
+    }
+
     @Override
     public String toString() {
         return "conta " + id + " (" + name + ")";
