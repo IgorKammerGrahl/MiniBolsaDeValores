@@ -5,6 +5,7 @@ import java.util.Arrays;
 import java.util.Locale;
 import minibolsa.bench.Benchmark;
 import minibolsa.client.Bots;
+import minibolsa.client.Monitor;
 import minibolsa.client.TerminalClient;
 import minibolsa.server.Server;
 
@@ -33,6 +34,7 @@ public final class Main {
                          --orders 200000          ordens por rodada (divididas entre as threads produtoras)
                          --repetitions 5          rodadas medidas por configuração (o CSV traz a mediana)
                          --output benchmark.csv   arquivo de saída
+              monitor  janela com a tabela de cotações e o gráfico de preço (--host localhost --port 9000)
               help     mostra esta ajuda
             """;
 
@@ -49,6 +51,7 @@ public final class Main {
                 case "client" -> TerminalClient.run(options);
                 case "bots" -> Bots.run(options);
                 case "bench" -> Benchmark.run(options);
+                case "monitor" -> Monitor.run(options);
                 default -> {
                     System.err.println("Modo desconhecido: " + args[0]);
                     System.err.print(HELP);
