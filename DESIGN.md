@@ -248,7 +248,25 @@ foram tomadas:
 Um verificador que nunca reclama passaria em todos os testes. Por isso o
 `InvariantCheckerTest` corrompe o estado de propósito e exige a reclamação.
 
-## 8. Outros detalhes
+## 8. O monitor gráfico e a thread do Swing
+
+O Swing não é thread-safe. Todo componente deve ser criado e alterado só na
+**EDT** (Event Dispatch Thread), a thread que desenha a janela e trata os cliques.
+O `Monitor` segue a regra com dois papéis separados:
+
+- a **thread principal** lê o socket e transforma cada linha `TICK` num
+  `QuoteBoard.Tick`, um record imutável, que pode passar de uma thread para outra
+  sem cuidado nenhum;
+- a **EDT** recebe cada tick por `SwingUtilities.invokeLater`, atualiza a tabela
+  (`QuoteBoard`, um `AbstractTableModel`) e redesenha o gráfico (`PriceChart`).
+
+O estado do monitor (últimos preços e histórico) é **confinado à EDT**, a mesma
+ideia do single-writer do livro: um único dono, então não há lock. A janela é
+criada na EDT, e a thread principal recebe a referência por um
+`CompletableFuture`. Se a criação falhar, o future completa com a exceção, em vez
+de deixar a thread principal esperando para sempre.
+
+## 9. Outros detalhes
 
 - **Cancelamento antes da chegada:** com duas sessões da mesma conta, um
   `CANCEL` pode chegar ao motor antes da própria ordem. O cancelamento zera a
@@ -277,7 +295,7 @@ Um verificador que nunca reclama passaria em todos os testes. Por isso o
 | `newVirtualThreadPerTaskExecutor` | sessões em `Server`, leitores em `Bots` |
 | `ScheduledExecutorService` | `MarketDataPublisher`, `Auditor`, `DeadlockWatchdog`, `Bots` |
 | `shutdown` + `awaitTermination` | `ExecutorShutdown` (usado por todos) |
-| `CompletableFuture` | `MatchingEngine.run`, `Exchange.submit` / `cancel` / `book` |
+| `CompletableFuture` | `MatchingEngine.run`, `Exchange.submit` / `cancel` / `book`, criação da janela em `Monitor` |
 | `Future.get` | `Server.transfer` |
 | `ReentrantLock` (exclusão mútua) | `Account` (um por conta), `GlobalLockEngine` (o global) |
 | Reentrância | `AccountRegistry.settle` no self-trade |
@@ -296,6 +314,7 @@ Um verificador que nunca reclama passaria em todos os testes. Por isso o
 | `CountDownLatch` | largada dos produtores em `Benchmark`, espera do modo `bots` |
 | `CyclicBarrier` | `TransferStressTest`, `UnsafeAccountsDemoTest` |
 | Shutdown hook (Ctrl+C) | `Server.run`, `Bots.run` |
+| Confinamento na EDT, `SwingUtilities.invokeLater` | `Monitor`, `QuoteBoard`, `PriceChart` |
 | Invariantes | `InvariantChecker`, `Exchange.checkInvariants`, `Auditor` |
 | Medição de desempenho (vazão, p50/p99) | `Benchmark` |
 
@@ -317,3 +336,4 @@ Um verificador que nunca reclama passaria em todos os testes. Por isso o
 | `DeadlockWatchdogTest` | o watchdog acusa o deadlock da transferência ingênua; a ordenada nunca trava |
 | `BotsIntegrationTest` | robôs negociam sem violação; a tempestade só trava o servidor ingênuo |
 | `BenchmarkTest` | percentil, mediana e o CSV completo |
+| `QuoteBoardTest` | interpretação do TICK, atualização da tabela, histórico de 2 minutos e o gráfico desenhado numa imagem (sem abrir janela) |

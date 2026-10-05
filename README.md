@@ -45,6 +45,7 @@ java -jar target/mini-bolsa.jar help
 | `client` | cliente de terminal (para quem não tem `nc`) | `--host localhost`, `--port 9000` |
 | `bots` | robôs que negociam sozinhos | `--count 50`, `--rate 10` (ações/s por robô), `--transfer-storm` |
 | `bench` | benchmark do motor de ordens, gera um CSV | `--orders 200000`, `--repetitions 5`, `--output benchmark.csv` |
+| `monitor` | janela com a tabela de cotações e o gráfico de preço | `--host localhost`, `--port 9000` |
 
 Opção desconhecida é erro, para que uma flag digitada errado não seja ignorada no
 meio de uma demonstração.
@@ -128,6 +129,22 @@ Cada robô abre a sua conexão (`robo-1`, `robo-2`, ...) e assina as cotações.
 último preço, e de vez em quando cancela uma ordem antiga. A cada 5 segundos o
 modo `bots` imprime um resumo. Com `--transfer-storm`, os robôs formam pares e
 cada um transfere R$ 1,00 para o outro sem parar, em vez de negociar.
+
+### Monitor gráfico
+
+```sh
+java -jar target/mini-bolsa.jar monitor --host localhost --port 9000
+```
+
+Uma janela Swing que se conecta como cliente (usuário `monitor`) e assina todas
+as cotações. A tabela mostra o último preço, a variação (verde quando sobe,
+vermelha quando cai) e o volume de cada ativo. O gráfico mostra os últimos 2
+minutos do ativo selecionado; clique numa linha da tabela para trocar. Com os
+robôs rodando, os preços se mexem a cada segundo:
+
+![Monitor gráfico com os robôs negociando](docs/monitor.png)
+
+Precisa de uma tela: num ambiente sem interface gráfica, o modo avisa e sai.
 
 ## Demonstrações
 
@@ -253,7 +270,7 @@ do projeto, com fonte grande, e o `benchmark.csv` já gerado.
 |---|---|---|---|
 | 1 | 3 min | Terminal 1: `server`. Terminais 2 e 3: `client`, ana vende e bia compra (seção [Como jogar](#como-jogar)). No terminal 2: `SUBSCRIBE PETR4` e mostrar os `TICK`. | Cada cliente tem duas virtual threads (`cliente-1-leitor` e `cliente-1-escritor` no log). A ordem é casada na thread `livro-PETR4`. Respostas e eventos passam por uma fila por cliente. |
 | 2 | 2 min | Mostrar a visão geral e o caminho de uma ordem no [DESIGN.md](DESIGN.md). | Single-writer: o livro tem uma única thread dona, então não precisa de lock. Contas têm lock próprio, sempre travado em ordem de id. |
-| 3 | 2 min | Demonstração 1: `server --audit-every 5` e 50 robôs; `STATS` duas vezes. | 500 ações por segundo, cinco livros em paralelo, e as invariantes valem. É a prova de que a concorrência está correta. |
+| 3 | 2 min | Demonstração 1: `server --audit-every 5` e 50 robôs; `STATS` duas vezes; o `monitor` aberto, com os preços se mexendo. | 500 ações por segundo, cinco livros em paralelo, e as invariantes valem. É a prova de que a concorrência está correta. No monitor, só a thread do Swing mexe na janela; o socket entrega cada TICK a ela com `invokeLater`. |
 | 4 | 3 min | Demonstração 2, à mão: dois `BUY` de R$ 60.000 com `--unsafe-accounts`; `PORTFOLIO` mostra −20.000. Abrir `AccountRegistry.reserve`. Repetir com lock. | Check-then-act: verificar e debitar precisam acontecer juntos, com o lock na mão. Com lock, o segundo é recusado (e até o LOGIN espera). |
 | 5 | 3 min | Demonstração 3, à mão: duas transferências cruzadas com `--naive-transfer`; log do watchdog e `STATS`. Mostrar a linha `fromFirst` em `AccountRegistry.transfer`. Repetir sem a flag. | As quatro condições do deadlock; ordenar os locks quebra a espera circular. O watchdog usa o `ThreadMXBean`, que só enxerga threads de plataforma: por isso o TRANSFER roda num pool. |
 | 6 | 2 min | Mostrar as tabelas do benchmark (abaixo). | Com muitos produtores, o single-writer vence. Com um ativo só, ele para em cerca de 1 milhão de ordens/s: o paralelismo é limitado pelo número de partições. |
@@ -349,7 +366,7 @@ energia da CPU). O que vale comparar é a forma das curvas.
 | `minibolsa.account` | `Account`, `AccountRegistry` (reserva, liquidação, transferência, locks), `InvariantChecker` |
 | `minibolsa.engine` | `Exchange` (fachada), `SingleWriterEngine`, `GlobalLockEngine` |
 | `minibolsa.server` | `Server`, `ClientSession`, `Protocol`, `MarketDataPublisher`, `Auditor`, `DeadlockWatchdog` |
-| `minibolsa.client` | `TerminalClient`, `Bot`, `Bots` |
+| `minibolsa.client` | `TerminalClient`, `Bot`, `Bots`, `Monitor` (janela Swing), `QuoteBoard`, `PriceChart` |
 | `minibolsa.bench` | `Benchmark` |
 
 O [DESIGN.md](DESIGN.md) traz o mapa completo "conceito da disciplina → classe"
