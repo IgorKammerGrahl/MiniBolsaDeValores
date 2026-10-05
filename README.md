@@ -44,8 +44,6 @@ java -jar target/mini-bolsa.jar help
 | `bots` | robôs que negociam sozinhos |
 | `bench` | benchmark do motor de ordens, com saída em CSV |
 
-> Projeto em construção: `bench` ainda está vazio e será implementado num próximo PR.
-
 ### Servidor e cliente
 
 ```sh
@@ -163,3 +161,85 @@ cruzadas rodam sem parar (cerca de 1.500 em 8 s) e `deadlocks=0`, porque as duas
 contas são travadas sempre em ordem crescente de id. No Ctrl+C, o servidor
 interrompe as threads presas (os locks da transferência aceitam interrupção) e
 encerra normalmente.
+
+## Benchmark
+
+Um comando roda todos os experimentos e grava o CSV (cerca de 1min30s numa
+máquina de 16 núcleos):
+
+```sh
+java -jar target/mini-bolsa.jar bench --output benchmark.csv
+```
+
+Opções: `--orders 200000` (ordens por rodada) e `--repetitions 5` (rodadas
+medidas por configuração).
+
+### Como é medido
+
+- **Em processo, sem rede.** Mede o motor, não o socket.
+- **Experimentos.** `single-writer` e `global-lock`, com 1, 2, 4, 8 e 16 threads
+  produtoras, em dois cenários: ordens espalhadas pelos 5 ativos (`5-ativos`) e
+  todas num ativo só (`1-ativo`).
+- **Cada produtor tem uma conta** e manda uma ordem por vez: reserva, envia e
+  espera o `CompletableFuture`, como uma sessão do servidor. A latência de uma
+  ordem vai do início da reserva até o resultado.
+- **Carga.** São pares "vende q a um preço até 1% acima ou abaixo do inicial,
+  compra q com limite no topo dessa faixa". Quase toda ordem gera negócio, o
+  livro não acumula ordens e nenhuma é recusada. Se uma ordem fosse recusada, o
+  benchmark pararia.
+- **Volume.** São sempre 200 mil ordens por rodada, divididas entre os produtores.
+- **Repetições.** Para cada configuração: 1 rodada de aquecimento, descartada, para
+  o JIT compilar o caminho quente, e 5 rodadas medidas. O CSV traz a mediana de
+  cada métrica.
+- **Invariantes.** Ao fim de cada rodada as cinco invariantes são verificadas.
+  Benchmark com resultado errado não vale: se alguma falhar, o programa para.
+- O pool do `global-lock` tem uma thread por núcleo.
+
+Colunas do CSV: `estrategia, threads, cenario, vazao_ordens_por_s, p50_us, p99_us`.
+
+### Resultado nesta máquina (16 núcleos, Java 25)
+
+Ordens espalhadas pelos 5 ativos:
+
+| Produtores | single-writer (ordens/s) | global-lock (ordens/s) | p99 single-writer | p99 global-lock |
+|---:|---:|---:|---:|---:|
+| 1 | 106 mil | 90 mil | 24 µs | 30 µs |
+| 2 | 302 mil | 227 mil | 17 µs | 36 µs |
+| 4 | 226 mil | 437 mil | 45 µs | 56 µs |
+| 8 | 848 mil | 709 mil | 25 µs | 65 µs |
+| 16 | 1,40 milhão | 773 mil | 46 µs | 79 µs |
+
+Todas as ordens num ativo só:
+
+| Produtores | single-writer (ordens/s) | global-lock (ordens/s) | p99 single-writer | p99 global-lock |
+|---:|---:|---:|---:|---:|
+| 1 | 132 mil | 99 mil | 17 µs | 29 µs |
+| 2 | 371 mil | 213 mil | 10 µs | 36 µs |
+| 4 | 750 mil | 444 mil | 10 µs | 54 µs |
+| 8 | 971 mil | 433 mil | 14 µs | 91 µs |
+| 16 | 905 mil | 631 mil | 27 µs | 97 µs |
+
+O que os números mostram:
+
+1. **Com muitos produtores, o single-writer vence nos dois cenários**, e com uma
+   cauda de latência bem menor. O livro dele não tem lock. No global-lock, as
+   threads do pool disputam um lock só, e o p99 cresce com elas (de 29 para 97 µs
+   com um ativo).
+2. **Com um ativo só, o single-writer para de escalar** em cerca de 1 milhão de
+   ordens/s, o limite de uma thread. De 8 para 16 produtores a vazão cai (971 mil
+   → 905 mil) e o p50 dobra (7,9 → 16,6 µs): forma fila na única thread do livro.
+   Com 5 ativos ele continua crescendo até 16 produtores (1,40 milhão). O
+   paralelismo do single-writer é limitado pelo número de partições.
+3. **A vantagem do single-writer diminui com um ativo, mas não some** (com 16
+   produtores, de 1,8× para 1,4×). Some o ganho do particionamento, porque os dois
+   viram uma fila só. Fica o custo de o global-lock passar o lock de thread em thread.
+4. **Com poucos produtores, a vazão é limitada pela latência de ida e volta**
+   (acordar a thread do motor e depois o produtor), não pela capacidade do motor.
+   Particionar tem custo. Com 4 produtores espalhados por 5 livros, cada thread de
+   livro passa a maior parte do tempo parada, e cada ordem paga para acordá-la
+   (p50 de 16 µs). Com um livro só, a thread nunca para. Essa é a explicação mais
+   provável de o cenário `5-ativos` ficar abaixo do `1-ativo` nessa faixa (o efeito
+   se repetiu em rodadas diferentes).
+
+Os números absolutos mudam de máquina para máquina (e com o modo de economia de
+energia da CPU). O que vale comparar é a forma das curvas.
