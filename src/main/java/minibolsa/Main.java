@@ -3,6 +3,7 @@ package minibolsa;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Locale;
+import minibolsa.bench.Benchmark;
 import minibolsa.client.Bots;
 import minibolsa.client.TerminalClient;
 import minibolsa.server.Server;
@@ -28,7 +29,10 @@ public final class Main {
                          --count 50               quantos robôs (cada um com sua conexão)
                          --rate 10                ações por segundo, por robô
                          --transfer-storm         em vez de negociar, pares transferem um para o outro sem parar
-              bench    benchmark do motor de ordens (em processo, saída CSV)
+              bench    benchmark do motor de ordens (em processo, sem rede), gera um CSV
+                         --orders 200000          ordens por rodada (divididas entre as threads produtoras)
+                         --repetitions 5          rodadas medidas por configuração (o CSV traz a mediana)
+                         --output benchmark.csv   arquivo de saída
               help     mostra esta ajuda
             """;
 
@@ -44,7 +48,7 @@ public final class Main {
                 case "server" -> Server.run(options);
                 case "client" -> TerminalClient.run(options);
                 case "bots" -> Bots.run(options);
-                case "bench" -> Log.info("Modo '" + mode + "' ainda não implementado.");
+                case "bench" -> Benchmark.run(options);
                 default -> {
                     System.err.println("Modo desconhecido: " + args[0]);
                     System.err.print(HELP);
