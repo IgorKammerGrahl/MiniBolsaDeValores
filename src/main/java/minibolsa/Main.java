@@ -3,6 +3,7 @@ package minibolsa;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Locale;
+import minibolsa.client.Bots;
 import minibolsa.client.TerminalClient;
 import minibolsa.server.Server;
 
@@ -23,6 +24,10 @@ public final class Main {
                          --audit-every 0          verifica as invariantes a cada N segundos (0 = nunca)
               client   cliente de terminal (--host localhost --port 9000)
               bots     robôs que negociam sozinhos
+                         --host localhost --port 9000
+                         --count 50               quantos robôs (cada um com sua conexão)
+                         --rate 10                ações por segundo, por robô
+                         --transfer-storm         em vez de negociar, pares transferem um para o outro sem parar
               bench    benchmark do motor de ordens (em processo, saída CSV)
               help     mostra esta ajuda
             """;
@@ -38,7 +43,8 @@ public final class Main {
                 case "help", "-h", "--help" -> System.out.print(HELP);
                 case "server" -> Server.run(options);
                 case "client" -> TerminalClient.run(options);
-                case "bots", "bench" -> Log.info("Modo '" + mode + "' ainda não implementado.");
+                case "bots" -> Bots.run(options);
+                case "bench" -> Log.info("Modo '" + mode + "' ainda não implementado.");
                 default -> {
                     System.err.println("Modo desconhecido: " + args[0]);
                     System.err.print(HELP);
